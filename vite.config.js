@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  // ⚠️ غيّر 'baraka-pwa' إلى اسم repository الخاص بك على GitHub
-  base: '/baraka-pwa/',
+  // المسار يكون فارغاً عند البناء لـ Capacitor (Android) وفارغاً لجيتهاب عند الحاجة
+  base: process.env.CAPACITOR_BUILD === 'true' ? '/' : '/baraka-pwa/',
 
   plugins: [
     react(),

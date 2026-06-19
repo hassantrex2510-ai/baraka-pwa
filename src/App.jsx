@@ -1,4 +1,30 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+
+// ═══ إعداد Firebase ═══
+const firebaseConfig = {
+  apiKey: "AIzaSyC-aDeCu_D5Eisj9ONVUGK7VTkXDHlSJKs",
+  authDomain: "baraka-pwa.firebaseapp.com",
+  projectId: "baraka-pwa",
+  storageBucket: "baraka-pwa.firebasestorage.app",
+  messagingSenderId: "499025330633",
+  appId: "1:499025330633:web:d081d02e1ce8f82fee6818"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ═══ دوال قراءة وحفظ البيانات ═══
+async function loadFromFirebase(key, defaultValue) {
+  try {
+    const snap = await getDoc(doc(db, "baraka", key));
+    return snap.exists() ? snap.data().value : defaultValue;
+  } catch { return defaultValue; }
+}
+
+async function saveToFirebase(key, value) {
+  try { await setDoc(doc(db, "baraka", key), { value }); } catch(e) { console.error(e); }
+}
 
 const initialSubscribers = [
   { id: "M001", name: "أحمد الزايدي", phone: "06 12 34 56 78", address: "حي النصر - زنقة 5 - رقم 12", lastReading: 120 },
@@ -37,6 +63,7 @@ const Icon = {
   phone: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8a19.79 19.79 0 01-3.07-8.68A2 2 0 012 .84h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 8.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>,
   pin: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>,
   download: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  upload: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
   share: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
   logout: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   hash: (c="currentColor",s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>,
@@ -54,6 +81,32 @@ export default function App() {
   const [screen, setScreen] = useState("home");
   const [subscribers, setSubscribers] = useState(initialSubscribers);
   const [readings, setReadings] = useState({ M001: 135, M002: 250, M003: 195, M004: 310, M005: 125 });
+  const [loaded, setLoaded] = useState(false);
+  const [smsSent, setSmsSent] = useState(0);
+  const [serviceIp, setServiceIp] = useState("...");
+
+  // ═══ شاشة الخدمة (للتطبيق Android فقط) ═══
+  const isAndroidApp = window.Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
+
+  useEffect(() => {
+    // الحصول على IP الهاتف
+    if (isAndroidApp) {
+      fetch('https://api.ipify.org?format=json')
+        .catch(() => {})
+      // نستخدم RTCPeerConnection للحصول على IP المحلي
+      try {
+        const pc = new RTCPeerConnection({iceServers:[]});
+        pc.createDataChannel('');
+        pc.createOffer().then(o => pc.setLocalDescription(o));
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            const ip = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (ip) setServiceIp(ip[1]);
+          }
+        };
+      } catch(e) {}
+    }
+  }, [isAndroidApp]);
   const [searchText, setSearchText] = useState("");
   const [selectedSub, setSelectedSub] = useState(null);
   const [newReading, setNewReading] = useState("");
@@ -65,6 +118,22 @@ export default function App() {
   const [formSuccess, setFormSuccess] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editSub, setEditSub] = useState(null);
+
+  // ═══ تحميل البيانات من Firebase عند البداية ═══
+  useEffect(() => {
+    async function loadData() {
+      const subs = await loadFromFirebase("subscribers", initialSubscribers);
+      const reads = await loadFromFirebase("readings", { M001: 135, M002: 250, M003: 195, M004: 310, M005: 125 });
+      setSubscribers(subs);
+      setReadings(reads);
+      setLoaded(true);
+    }
+    loadData();
+  }, []);
+
+  // ═══ حفظ تلقائي عند كل تغيير ═══
+  useEffect(() => { if (loaded) saveToFirebase("subscribers", subscribers); }, [subscribers, loaded]);
+  useEffect(() => { if (loaded) saveToFirebase("readings", readings); }, [readings, loaded]);
 
   const totalSubscribers = subscribers.length;
   const readCount = Object.keys(readings).filter(id => subscribers.find(s => s.id === id)).length;
@@ -181,6 +250,80 @@ export default function App() {
   // ══════════════════════════════════════
   // HOME
   // ══════════════════════════════════════
+  // شاشة الخدمة للتطبيق Android
+  if (isAndroidApp) return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0F172A 0%, #1E3A5F 50%, #0F172A 100%)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', padding: '24px', fontFamily: 'Arial, sans-serif',
+      direction: 'rtl', color: 'white'
+    }}>
+      {/* شعار */}
+      <div style={{
+        width: 100, height: 100, borderRadius: '50%',
+        background: 'linear-gradient(135deg, #2563EB, #06B6D4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 48, marginBottom: 24,
+        boxShadow: '0 0 40px rgba(37,99,235,0.5)'
+      }}>💧</div>
+
+      <h1 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 6px', textAlign: 'center' }}>
+        جمعية البركة للتنمية
+      </h1>
+      <p style={{ fontSize: 14, color: '#94A3B8', margin: '0 0 40px', textAlign: 'center' }}>
+        تسيير الماء الصالح للشرب
+      </p>
+
+      {/* حالة الخدمة */}
+      <div style={{
+        background: 'rgba(255,255,255,0.07)', borderRadius: 16,
+        padding: '24px', width: '100%', maxWidth: 320,
+        border: '1px solid rgba(255,255,255,0.1)', marginBottom: 20
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{
+            width: 12, height: 12, borderRadius: '50%',
+            background: '#22C55E', boxShadow: '0 0 10px #22C55E'
+          }}/>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>الخدمة تعمل في الخلفية</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: '#94A3B8' }}>عنوان IP</span>
+            <span style={{ fontWeight: 700, color: '#06B6D4', fontFamily: 'monospace' }}>{serviceIp}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: '#94A3B8' }}>المنفذ</span>
+            <span style={{ fontWeight: 700, color: '#06B6D4', fontFamily: 'monospace' }}>8765</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: '#94A3B8' }}>رسائل مرسلة</span>
+            <span style={{ fontWeight: 700, color: '#22C55E' }}>{smsSent}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* تعليمات */}
+      <div style={{
+        background: 'rgba(37,99,235,0.15)', borderRadius: 12,
+        padding: '16px', width: '100%', maxWidth: 320,
+        border: '1px solid rgba(37,99,235,0.3)'
+      }}>
+        <p style={{ fontSize: 12, color: '#93C5FD', margin: 0, lineHeight: 1.8, textAlign: 'center' }}>
+          📡 تأكد أن الحاسوب والهاتف<br/>
+          متصلان بنفس شبكة WiFi<br/>
+          ثم أرسل SMS من برنامج الحاسوب
+        </p>
+      </div>
+
+      <p style={{ fontSize: 11, color: '#475569', marginTop: 32, textAlign: 'center' }}>
+        يمكنك إغلاق هذه الشاشة — الخدمة ستبقى تعمل
+      </p>
+    </div>
+  );
+
   if (screen === "home") return (
     <div style={styles.app}>
       <DeleteModal />
@@ -432,38 +575,116 @@ export default function App() {
   // ══════════════════════════════════════
   if (screen === "exportCSV") {
     function doExport() {
-      const rows = [["رقم العداد", "اسم المنخرط", "القراءة السابقة", "القراءة الجديدة", "الاستهلاك"]];
+      // نفس هيكل النموذج: رقم العداد, القراءة الجديدة
+      const rows = [["رقم العداد", "القراءة الجديدة"]];
       subscribers.forEach(sub => {
-        const r = readings[sub.id] ?? "-"; const cons = readings[sub.id] != null ? readings[sub.id] - sub.lastReading : "-";
-        rows.push([sub.id, sub.name, sub.lastReading, r, cons]);
+        rows.push([sub.id, readings[sub.id] ?? ""]);
       });
       const blob = new Blob(["\uFEFF" + rows.map(r => r.join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `قراءات_${MONTH}.csv`; a.click(); URL.revokeObjectURL(url);
-      setCsvExported(true); setTimeout(() => setCsvExported(false), 2000);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `قراءات_${MONTH}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setCsvExported(true);
+      setTimeout(() => setCsvExported(false), 2000);
     }
+
+    function doExportTemplate() {
+      // نموذج فارغ للملء
+      const rows = [["رقم العداد", "القراءة الجديدة"]];
+      subscribers.forEach(sub => rows.push([sub.id, ""]));
+      const blob = new Blob(["\uFEFF" + rows.map(r => r.join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `نموذج-القراءات.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     return (
       <div style={styles.app}>
-        <Header title="تصدير ملف CSV" onBack={() => setScreen("home")} />
-        <div style={{ padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 16, direction: "rtl", flex: 1 }}>
-          <div style={{ width: 90, height: 90, background: "#E8F5E9", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icon.csv("#2E7D32", 44)}</div>
-          <div style={{ color: "#1565C0", fontWeight: 700, fontSize: 16 }}>للشهر: {MONTH}</div>
-          <div style={{ background: "#f9f9f9", borderRadius: 14, width: "100%", padding: 16, border: "1px solid #eee" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #eee", alignItems: "center" }}>
-              <span style={{ color: "#555", display: "flex", alignItems: "center", gap: 6 }}>{Icon.users("#888", 16)} عدد القراءات</span>
-              <span style={{ fontWeight: 700, color: "#1565C0", fontSize: 16 }}>{readCount}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", alignItems: "center" }}>
-              <span style={{ color: "#555", display: "flex", alignItems: "center", gap: 6 }}>{Icon.water("#888", 16)} إجمالي الاستهلاك</span>
-              <span style={{ fontWeight: 700, color: "#1565C0", fontSize: 16 }}>{totalConsumption} م³</span>
+        <Header title="تصدير / استيراد CSV" onBack={() => setScreen("home")} />
+        <div style={{ padding: 16, direction: "rtl", flex: 1, overflowY: "auto" }}>
+
+          {/* هيكل الملف */}
+          <div style={{ background: "#E3F2FD", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #BBDEFB" }}>
+            <div style={{ fontWeight: 700, color: "#1565C0", marginBottom: 8, fontSize: 14 }}>📋 هيكل ملف CSV</div>
+            <div style={{ background: "#fff", borderRadius: 8, padding: 10, fontFamily: "monospace", fontSize: 12, direction: "ltr", color: "#333", lineHeight: 1.8 }}>
+              رقم العداد,القراءة الجديدة<br/>
+              M001,145<br/>
+              M002,267<br/>
+              M003,195
             </div>
           </div>
+
+          {/* إحصائيات */}
+          <div style={{ background: "#fff", borderRadius: 14, padding: 14, border: "1px solid #eee", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #eee", alignItems: "center" }}>
+              <span style={{ color: "#555", fontSize: 14 }}>عدد المنخرطين</span>
+              <span style={{ fontWeight: 700, color: "#1565C0" }}>{subscribers.length}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #eee", alignItems: "center" }}>
+              <span style={{ color: "#555", fontSize: 14 }}>قراءات مسجلة</span>
+              <span style={{ fontWeight: 700, color: "#2E7D32" }}>{readCount}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", alignItems: "center" }}>
+              <span style={{ color: "#555", fontSize: 14 }}>إجمالي الاستهلاك</span>
+              <span style={{ fontWeight: 700, color: "#1565C0" }}>{totalConsumption} م³</span>
+            </div>
+          </div>
+
           {csvExported && <SuccessMsg text="تم التصدير بنجاح!" />}
-          <button onClick={doExport} style={{ ...styles.primaryBtn, width: "100%", background: "#2E7D32", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {Icon.download("#fff", 20)} تصدير ملف CSV
+
+          {/* أزرار التصدير */}
+          <div style={{ fontWeight: 700, marginBottom: 10, color: "#333", fontSize: 14 }}>📤 تصدير</div>
+          <button onClick={doExport} style={{ ...styles.primaryBtn, width: "100%", background: "#2E7D32", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10 }}>
+            {Icon.download("#fff", 18)} تصدير القراءات (CSV)
           </button>
-          <button style={{ ...styles.outlineBtn, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {Icon.share("#555", 18)} مشاركة الملف
+          <button onClick={doExportTemplate} style={{ ...styles.outlineBtn, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 20 }}>
+            {Icon.csv("#555", 18)} تحميل نموذج فارغ
           </button>
+
+          {/* استيراد */}
+          <div style={{ fontWeight: 700, marginBottom: 10, color: "#333", fontSize: 14 }}>📥 استيراد</div>
+          <label style={{ display: "block", width: "100%", cursor: "pointer" }}>
+            <div style={{ ...styles.outlineBtn, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#F3E5F5", borderColor: "#CE93D8", color: "#6A1B9A", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, boxSizing: "border-box" }}>
+              {Icon.upload("#6A1B9A", 18)} اختيار ملف CSV للاستيراد
+            </div>
+            <input type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={e => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = ev => {
+                const text = ev.target.result.replace(/^\uFEFF/, '').trim();
+                const lines = text.split(/\r?\n/).filter(l => l.trim());
+                const startIdx = lines[0].includes('رقم') || lines[0].toLowerCase().includes('id') ? 1 : 0;
+                let imported = 0, errors = 0;
+                const newReadings = { ...readings };
+                for (let i = startIdx; i < lines.length; i++) {
+                  const parts = lines[i].split(',').map(p => p.trim().replace(/"/g, ''));
+                  if (parts.length < 2) continue;
+                  const id = parts[0].toUpperCase();
+                  const val = parseInt(parts[1]);
+                  const sub = subscribers.find(s => s.id === id);
+                  if (!sub || isNaN(val) || val < sub.lastReading) { errors++; continue; }
+                  newReadings[id] = val;
+                  imported++;
+                }
+                setReadings(newReadings);
+                setCsvExported(true);
+                setTimeout(() => setCsvExported(false), 3000);
+                alert(`✅ تم استيراد ${imported} قراءة${errors > 0 ? `\n⚠️ ${errors} صف بها أخطاء` : ''}`);
+              };
+              reader.readAsText(file, 'utf-8');
+              e.target.value = '';
+            }} />
+          </label>
+          <div style={{ fontSize: 12, color: "#999", marginTop: 8, textAlign: "center" }}>
+            الملف يجب أن يحتوي على: رقم العداد، القراءة الجديدة
+          </div>
         </div>
       </div>
     );

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">baraka-pwa</string>
+    <string name="title_activity_main">baraka-pwa</string>
+    <string name="package_name">com.baraka.pwa</string>
+    <string name="custom_url_scheme">com.baraka.pwa</string>
+</resources>
